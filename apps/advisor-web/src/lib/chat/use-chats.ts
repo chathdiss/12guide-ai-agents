@@ -83,12 +83,20 @@ export function useChats(lang: Lang) {
             attachments: attachments.map(({ name, kind, mimeType, data }) => ({ name, kind, mimeType, data })),
           } satisfies ChatRequest),
         });
-        const data = await res.json();
+        // A forward that fails (backend not running) comes back as plain text, not JSON
+        const data = await res.json().catch(() => null);
+        if (!data) throw new Error(t.apiError("server_unreachable", undefined));
         if (!res.ok) throw new Error(t.apiError(data.code as ApiErrorCode | undefined, data.error));
         const { answer, sources, followUps, tier, tierReason } = data as ChatResponse;
         reply = { id: uid(), role: "assistant", content: answer, sources, followUps, tier, tierReason, createdAt: Date.now() };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : t.genericError;
+        // fetch itself rejects with a TypeError when the network or the site is down
+        const msg =
+          err instanceof TypeError
+            ? t.apiError("server_unreachable", undefined)
+            : err instanceof Error
+              ? err.message
+              : t.genericError;
         reply = { id: uid(), role: "assistant", content: msg, error: true, createdAt: Date.now() };
       }
 

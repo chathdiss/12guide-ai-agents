@@ -23,7 +23,9 @@ export type ApiErrorCode =
   | "n8n_status"
   | "no_answer"
   | "too_slow"
-  | "unreachable";
+  | "unreachable"
+  | "rate_limited"
+  | "server_unreachable";
 
 export type Strings = {
   appName: string;
@@ -149,6 +151,10 @@ export const STRINGS: Record<Lang, Strings> = {
           return "The advisor took too long to respond.";
         case "unreachable":
           return "Could not reach n8n. Is it running?";
+        case "rate_limited":
+          return "Too many requests in a short time. Please wait a moment and try again.";
+        case "server_unreachable":
+          return "The service could not be reached. Please try again in a moment.";
         default:
           return fallback ?? "Something went wrong.";
       }
@@ -239,6 +245,10 @@ export const STRINGS: Record<Lang, Strings> = {
           return "De adviseur deed er te lang over om te antwoorden.";
         case "unreachable":
           return "n8n is niet bereikbaar. Draait het?";
+        case "rate_limited":
+          return "Te veel verzoeken in korte tijd. Wacht even en probeer het opnieuw.";
+        case "server_unreachable":
+          return "De service is niet bereikbaar. Probeer het zo meteen opnieuw.";
         default:
           return fallback ?? "Er is iets misgegaan.";
       }

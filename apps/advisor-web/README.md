@@ -8,14 +8,17 @@ The agent itself (prompt, tier router, Claude calls) is an n8n workflow in [`age
 
 Needs Node 20.9 or newer (developed on Node 24).
 
-```bash
+Normal setup, with the backend in [`apps/api`](../api) running on port 4000:
+
+```powershell
 cd apps/advisor-web
 npm install
-cp .env.example .env.local   # then set N8N_WEBHOOK_URL
-npm run dev                  # http://localhost:3000
+$env:API_URL="http://localhost:4000"; npm run dev    # http://localhost:3000
 ```
 
-`N8N_WEBHOOK_URL` is the production webhook URL of the imported Advisor workflow, for example `http://localhost:5678/webhook/advisor-chat`. It is only read on the server and never reaches the browser.
+`API_URL` is the address of the backend. Every `/api/...` call from the browser is forwarded there by a rewrite in `next.config.ts` (read when the server starts or the site is built), so the browser only talks to this site. In the deployed setup it is the Render address, set as an environment variable in Netlify, without a trailing `/`.
+
+Quick alternative without the backend: leave `API_URL` unset, copy `.env.example` to `.env.local` and set `N8N_WEBHOOK_URL`. The app's own `/api/chat` route then calls the n8n webhook directly.
 
 ## What it does
 
@@ -28,9 +31,11 @@ npm run dev                  # http://localhost:3000
 
 ## How it works
 
-`Browser → /api/chat (Next.js route) → n8n webhook → Claude`
+`Browser → /api/chat → backend (apps/api) → n8n webhook → Claude`
 
-`src/app/api/chat/route.ts` validates the request and forwards it to n8n, so the webhook URL stays on the server. The request and response shapes are in `src/lib/chat/api-types.ts`.
+The request and response shapes are in `src/lib/chat/api-types.ts`. Without `API_URL`, `src/app/api/chat/route.ts` plays the role of the backend and calls n8n directly.
+
+Forwarded requests wait up to 2 minutes (`experimental.proxyTimeout`). Next.js would otherwise give up after 30 seconds, which a Super-tier answer can exceed.
 
 ## Structure
 

@@ -8,9 +8,11 @@ The logic of the Advisor agent, built as an n8n workflow. The chat web app (`app
 
 ## Setup
 
-1. Import `n8n-agent-workflow.json`.
-2. Open the **Claude** node and select an Anthropic credential. Credentials are not part of the file.
-3. Save and set the workflow to **Active**. The webhook path is `advisor-chat`, so the production URL is `http://<n8n host>/webhook/advisor-chat`. Put that URL in `apps/advisor-web/.env.local` as `N8N_WEBHOOK_URL`.
+1. Import `n8n-agent-workflow.json` and rename the workflow, on a shared server for example `Advisor – Chat agent`.
+2. Open the **Claude** node and select an Anthropic credential (create `Advisor – Anthropic` with the API key). Credentials are not part of the file.
+3. Open the **Webhook** node and set **Authentication** to **Header Auth**. Create a credential `Advisor – internal key` with header name `X-Internal-Key` and the shared secret as value. The same secret goes into the backend as `INTERNAL_API_KEY`. Without this, anyone who finds the URL can use the agent.
+4. Save and set the workflow to **Active**. The webhook path is `advisor-chat`, so the production URL is `http://<n8n host>/webhook/advisor-chat`. Put that URL in the backend (`apps/api`) as `N8N_CHAT_URL`.
+5. Test it: a request with the right `X-Internal-Key` header must be answered, and one without it must be refused.
 
 Tested on n8n 2.41.5 (Node 24). The Claude node must be version 1.6 or newer: older versions always send a `thinking` setting that the newest Claude models reject.
 

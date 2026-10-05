@@ -59,7 +59,7 @@ export async function POST(req: Request) {
   }
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (process.env.N8N_WEBHOOK_SECRET) headers["x-webhook-secret"] = process.env.N8N_WEBHOOK_SECRET;
+  if (process.env.N8N_WEBHOOK_SECRET) headers["X-Internal-Key"] = process.env.N8N_WEBHOOK_SECRET;
 
   try {
     const res = await fetch(webhookUrl, {
