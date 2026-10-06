@@ -1,4 +1,6 @@
 import { createApp } from "./server.js";
+import { createRetriever } from "./knowledge.js";
+import { searchKnowledge } from "../../../packages/knowledge/src/search.js";
 
 const port = Number(process.env.PORT) || 4000; // Render sets PORT itself
 
@@ -14,6 +16,21 @@ if (!config.n8nChatUrl) {
 }
 if (!config.internalKey) {
   console.warn("Warning: INTERNAL_API_KEY is not set, so requests to n8n are sent without the X-Internal-Key header.");
+}
+
+// The knowledge base (PostgreSQL, see packages/db) is optional: without DATABASE_URL the agent
+// answers from general knowledge and says so.
+if (process.env.DATABASE_URL) {
+  const { default: pg } = await import("pg");
+  const db = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 5,
+    connectionTimeoutMillis: 3000,
+    statement_timeout: 5000,
+  });
+  config.retrieve = createRetriever({ db, search: searchKnowledge });
+} else {
+  console.warn("Warning: DATABASE_URL is not set, so answers are not grounded in the approved sources.");
 }
 
 createApp(config).listen(port, () => {

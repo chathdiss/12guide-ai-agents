@@ -1,11 +1,13 @@
 import { createServer } from "node:http";
 import { askAgent } from "./agent.js";
+import { buildCitations } from "./cite.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { validateChatRequest } from "./validate.js";
 
 const DEFAULT_MAX_BODY_BYTES = 30 * 1024 * 1024; // up to 4 images of about 6 MB each, as base64
 
-// config: { n8nChatUrl, internalKey, rateLimitPerMinute, agentTimeoutMs, maxBodyBytes, fetchImpl }
+// config: { n8nChatUrl, internalKey, rateLimitPerMinute, agentTimeoutMs, maxBodyBytes, fetchImpl, retrieve }
+// retrieve(question, history) searches the knowledge base: { status: "ok" | "unavailable", passages }
 export function createApp(config) {
   const maxBodyBytes = config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const limiter = createRateLimiter({ limit: config.rateLimitPerMinute ?? 30 });
@@ -46,7 +48,12 @@ export function createApp(config) {
       return sendJson(res, checked.status, { error: checked.error, code: checked.code });
     }
 
-    const result = await askAgent(checked.value, {
+    // Search the approved sources first: the agent may only answer from what is found here
+    const knowledge = config.retrieve
+      ? await config.retrieve(checked.value.question, checked.value.history)
+      : { status: "unavailable", passages: [] };
+
+    const result = await askAgent({ ...checked.value, knowledge: knowledge.status, passages: knowledge.passages }, {
       url: config.n8nChatUrl,
       internalKey: config.internalKey,
       timeoutMs: config.agentTimeoutMs,
@@ -58,9 +65,19 @@ export function createApp(config) {
       return sendJson(res, result.status, { error: result.error, code: result.code });
     }
 
+    const cited = buildCitations(result.value.answer, knowledge.passages);
+    const value = { ...result.value, answer: cited.answer, sources: cited.sources };
+
     // Only metadata is logged, never the questions or answers
-    log({ status: 200, tier: result.value.tier, ms: Date.now() - started });
-    return sendJson(res, 200, result.value);
+    log({
+      status: 200,
+      tier: value.tier,
+      knowledge: knowledge.status,
+      found: knowledge.passages.length,
+      cited: value.sources.length,
+      ms: Date.now() - started,
+    });
+    return sendJson(res, 200, value);
   }
 
   server.on("close", () => limiter.stop());

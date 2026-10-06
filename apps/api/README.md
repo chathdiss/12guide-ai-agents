@@ -1,6 +1,6 @@
 # Advisor API
 
-The backend of the Advisor web app. It receives questions from the website, checks them, forwards them to the Advisor agent (an n8n workflow, see [`agents/advisor`](../../agents/advisor)) and returns the answer. It has no dependencies: plain Node.js, no build step.
+The backend of the Advisor web app. It receives questions from the website, checks them, forwards them to the Advisor agent (an n8n workflow, see [`agents/advisor`](../../agents/advisor)) and returns the answer. Plain Node.js, no build step; the only dependency is `pg`, for the knowledge base.
 
 The Claude API key is **not** needed here. Claude is called by the n8n workflow, whose credential lives in n8n. This server only needs the n8n webhook URL and a shared secret.
 
@@ -13,12 +13,17 @@ The Claude API key is **not** needed here. Claude is called by the n8n workflow,
 
 Errors are returned as `{ error, code }`. The website turns the `code` into a message in the chosen language (`invalid_request`, `attachments_invalid`, `rate_limited`, `not_found`, `n8n_status`, `no_answer`, `too_slow`, `unreachable`, `not_configured`).
 
+## How answers are grounded
+
+For every question the server first searches the knowledge base (`packages/knowledge/src/search.js`) and sends the passages it found to the agent together with the question. The agent may only answer from those passages and marks each claim with `[1]`, `[2]`, ... (numbers valid for that request only). When the answer comes back, `src/cite.js` removes markers that match no passage, renumbers the rest in order of use, and returns exactly the cited passages as `sources`, each with file path, line range and the passage itself. If nothing relevant is found the agent says so instead of guessing, and if the database is down it answers from general knowledge with a warning line.
+
 ## Settings (environment variables)
 
 | Variable | Needed | Meaning |
 |---|---|---|
 | `N8N_CHAT_URL` | yes | Production URL of the Advisor webhook in n8n |
 | `INTERNAL_API_KEY` | yes | Shared secret, sent to n8n as the `X-Internal-Key` header |
+| `DATABASE_URL` | no | The knowledge base ([`packages/db`](../../packages/db)). Without it the agent answers from general knowledge and says so |
 | `PORT` | no | Defaults to 4000; Render sets it |
 | `RATE_LIMIT_PER_MINUTE` | no | Requests per client per minute, default 30 |
 | `AGENT_TIMEOUT_MS` | no | How long to wait for the agent, default 120000 |
