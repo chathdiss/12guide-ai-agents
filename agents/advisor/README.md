@@ -47,8 +47,11 @@ The Claude node must be version **1.5 or newer**, which is where the `Thinking M
 
 The request and response shapes are defined in `apps/advisor-web/src/lib/chat/api-types.ts`.
 
+## Grounded search (Step 8)
+
+Grounded search: the backend searches `packages/knowledge` and sends the passages to this workflow with each question; the agent answers only from them and cites them. Re-import the workflow file after changes to the prompts. More sources (IFS Community, 12Guide) and vector search come later.
+
 ## Not built yet
 
-- Grounded search over 12Guide and IFS sources (`packages/knowledge`). Answers currently come from the model's general knowledge and say so.
 - Memory (`packages/memory`).
 - The tier rules and prompts live inside the workflow JSON. They can be moved into code in this folder when the team decides how the agent is deployed.
