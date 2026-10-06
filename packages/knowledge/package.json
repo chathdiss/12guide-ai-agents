@@ -1,0 +1,20 @@
+{
+  "name": "@12guide/knowledge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Knowledge base of the Advisor: reads documents, splits them into chunks and stores them in PostgreSQL.",
+  "type": "module",
+  "scripts": {
+    "db:init": "node --env-file=../db/.env src/cli/init-db.js",
+    "ingest:ifs": "node --env-file=../db/.env src/cli/ingest-ifs.js",
+    "ingest:ifs:dry": "node src/cli/ingest-ifs.js --dry-run",
+    "test": "node --test",
+    "search": "node --env-file=../db/.env src/cli/search.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}
