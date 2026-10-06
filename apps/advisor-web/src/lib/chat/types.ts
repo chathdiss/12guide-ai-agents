@@ -1,7 +1,14 @@
 export type Source = {
   title: string;
+  // empty for sources without a web page, such as source code: those are cited by file and lines
   url: string;
-  origin: "IFS documentation" | "IFS community" | "12Guide";
+  origin: "IFS documentation" | "IFS community" | "12Guide" | "IFS source code";
+  path?: string;
+  startLine?: number;
+  endLine?: number;
+  version?: string;
+  // the passage the answer is based on
+  excerpt?: string;
 };
 
 // What is kept with a message in history. The file content itself is never stored.

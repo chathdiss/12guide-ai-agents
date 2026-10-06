@@ -7,7 +7,7 @@ import { AlertCircle, Check, Copy, CornerDownRight, ExternalLink, FileText, Rota
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/components/language-provider";
 import { cn } from "@/lib/utils";
-import type { Message, Tier } from "@/lib/chat/types";
+import type { Message, Source, Tier } from "@/lib/chat/types";
 import { BrandMark } from "./brand-mark";
 
 type Props = {
@@ -40,6 +40,51 @@ function hostOf(url: string): string {
   } catch {
     return "";
   }
+}
+
+function SourceCard({ source: s, index }: { source: Source; index: number }) {
+  const { t } = useLanguage();
+  const where = s.url
+    ? [s.origin, hostOf(s.url)].filter(Boolean).join(" · ")
+    : [s.origin, s.version, s.startLine && s.endLine ? t.sourceLines(s.startLine, s.endLine) : ""].filter(Boolean).join(" · ");
+
+  const body = (
+    <>
+      <span className="mt-px font-semibold text-primary">[{index}]</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-foreground">{s.title}</span>
+        {s.path && <span className="block truncate font-mono text-[11px] text-muted-foreground">{s.path}</span>}
+        <span className="block truncate text-muted-foreground">{where}</span>
+      </span>
+    </>
+  );
+  const box = "flex items-start gap-2.5 rounded-lg border bg-card px-3 py-2 text-xs leading-snug";
+
+  return (
+    <div>
+      {s.url ? (
+        <a
+          href={s.url}
+          target="_blank"
+          rel="noreferrer"
+          className={cn(box, "group transition-colors hover:border-primary/40 hover:bg-accent")}
+        >
+          {body}
+          <ExternalLink className="mt-0.5 size-3 shrink-0 text-muted-foreground group-hover:text-primary" />
+        </a>
+      ) : (
+        <div className={box}>{body}</div>
+      )}
+      {s.excerpt && (
+        <details className="mt-1 text-xs">
+          <summary className="cursor-pointer px-1 text-muted-foreground hover:text-foreground">{t.showPassage}</summary>
+          <pre className="mt-1 max-h-60 overflow-auto rounded-lg border bg-muted/50 p-2 font-mono text-[11px] leading-snug whitespace-pre-wrap">
+            {s.excerpt}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -151,23 +196,8 @@ export function MessageItem({ message, showFollowUps = false, onFollowUp, onRetr
             <div className="mb-2 text-xs font-medium text-muted-foreground">{t.sources}</div>
             <ul className="grid gap-2 sm:grid-cols-2">
               {message.sources.map((s, i) => (
-                <li key={s.url}>
-                  <a
-                    href={s.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="group flex items-start gap-2.5 rounded-lg border bg-card px-3 py-2 text-xs leading-snug transition-colors hover:border-primary/40 hover:bg-accent"
-                  >
-                    <span className="mt-px font-semibold text-primary">[{i + 1}]</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium text-foreground">{s.title}</span>
-                      <span className="block truncate text-muted-foreground">
-                        {s.origin}
-                        {hostOf(s.url) && ` · ${hostOf(s.url)}`}
-                      </span>
-                    </span>
-                    <ExternalLink className="mt-0.5 size-3 shrink-0 text-muted-foreground group-hover:text-primary" />
-                  </a>
+                <li key={`${s.url}${s.path ?? ""}${s.startLine ?? i}`}>
+                  <SourceCard source={s} index={i + 1} />
                 </li>
               ))}
             </ul>

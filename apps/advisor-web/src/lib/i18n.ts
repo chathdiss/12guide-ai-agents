@@ -46,6 +46,8 @@ export type Strings = {
   send: string;
   removeFile: (name: string) => string;
   sources: string;
+  sourceLines: (start: number, end: number) => string;
+  showPassage: string;
   followUps: string;
   tierLabel: (tier: string) => string;
   tierReason: (reason: string) => string;
@@ -101,11 +103,13 @@ export const STRINGS: Record<Lang, Strings> = {
       "Which IFS Cloud release introduced the new Aurena navigator?",
     ],
     placeholder: "Ask about IFS Cloud…",
-    disclaimer: "Answers are not yet verified against approved IFS sources. Always check the official documentation.",
+    disclaimer: "Answers are based on the approved sources and cite them. Always check critical details in the official documentation.",
     attachFiles: "Attach files",
     send: "Send",
     removeFile: (name) => `Remove ${name}`,
     sources: "Sources",
+    sourceLines: (a, b) => `lines ${a}–${b}`,
+    showPassage: "Show passage",
     followUps: "You could also ask",
     tierLabel: (tier) => `${cap(tier)} tier`,
     tierReason: (reason) => `Chosen because: ${reason}`,
@@ -195,11 +199,13 @@ export const STRINGS: Record<Lang, Strings> = {
     ],
     placeholder: "Stel een vraag over IFS Cloud…",
     disclaimer:
-      "Antwoorden zijn nog niet geverifieerd aan de hand van goedgekeurde IFS-bronnen. Controleer altijd de officiële documentatie.",
+      "Antwoorden zijn gebaseerd op de goedgekeurde bronnen en verwijzen ernaar. Controleer kritieke details altijd in de officiële documentatie.",
     attachFiles: "Bijlagen toevoegen",
     send: "Verzenden",
     removeFile: (name) => `${name} verwijderen`,
     sources: "Bronnen",
+    sourceLines: (a, b) => `regels ${a}–${b}`,
+    showPassage: "Passage tonen",
     followUps: "U kunt ook vragen",
     tierLabel: (tier) => `${cap(tier)}-niveau`,
     tierReason: (reason) => `Gekozen omdat: ${reason}`,
