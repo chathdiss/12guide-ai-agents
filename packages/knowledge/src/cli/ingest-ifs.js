@@ -9,6 +9,7 @@
 // The documents stay outside the repository; only this code is committed.
 import { prepareDocument } from "../prepare.js";
 import { ORIGIN, SOURCE_ID, walkIfsSource } from "../sources/ifs-source.js";
+import { refreshTermStats } from "../store.js";
 
 function parseArgs(argv) {
   const args = { dir: process.env.IFS_SOURCE_DIR, dryRun: false, prune: false, limit: Infinity };
@@ -143,6 +144,7 @@ async function main() {
     removed = gone.length;
   }
 
+  if (pool && added + changed > 0) await refreshTermStats(pool); // the search weighs words by how rare they are
   if (pool) await pool.end();
 
   console.log(`\n${dryRun ? "DRY RUN (nothing stored)" : "Stored in the database"}`);
