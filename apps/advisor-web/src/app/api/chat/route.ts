@@ -10,7 +10,7 @@ import {
 
 export const runtime = "nodejs";
 
-const TIMEOUT_MS = 120_000;
+const TIMEOUT_MS = 600_000;
 
 function validAttachments(input: unknown): AttachmentPayload[] | null {
   if (input === undefined) return [];

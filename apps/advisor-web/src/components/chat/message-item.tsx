@@ -53,7 +53,7 @@ function SourceCard({ source: s, index }: { source: Source; index: number }) {
       <span className="mt-px font-semibold text-primary">[{index}]</span>
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium text-foreground">{s.title}</span>
-        {s.path && <span className="block truncate font-mono text-[11px] text-muted-foreground">{s.path}</span>}
+        {s.path && !s.url && <span className="block truncate font-mono text-[11px] text-muted-foreground">{s.path}</span>}
         <span className="block truncate text-muted-foreground">{where}</span>
       </span>
     </>

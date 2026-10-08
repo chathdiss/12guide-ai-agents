@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
   experimental: {
     // Next.js gives up on a forwarded request after 30 s by default, but a Super-tier answer can take
     // longer. The backend itself waits up to 120 s for the agent.
-    proxyTimeout: 120_000,
+    proxyTimeout: 600_000,
   },
   async rewrites() {
     if (!apiUrl) return [];
