@@ -1,6 +1,6 @@
 import { cleanAgentResponse } from "./validate.js";
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 600_000; // complete answers are long: the model may write for several minutes
 
 // Sends one question to the Advisor agent (the n8n webhook) and returns either
 // { ok: true, value } with the cleaned answer, or { ok: false, status, code, error }.

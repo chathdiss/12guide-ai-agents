@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { askAgent } from "./agent.js";
-import { buildCitations } from "./cite.js";
+import { buildCitations, repairCitations } from "./cite.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { validateChatRequest } from "./validate.js";
 
@@ -65,7 +65,9 @@ export function createApp(config) {
       return sendJson(res, result.status, { error: result.error, code: result.code });
     }
 
-    const cited = buildCitations(result.value.answer, knowledge.passages);
+    // markers the model put under the wrong number are moved to the passage that holds the fact
+    const repair = repairCitations(result.value.answer, knowledge.passages);
+    const cited = buildCitations(repair.answer, knowledge.passages);
     const value = { ...result.value, answer: cited.answer, sources: cited.sources };
 
     // Only metadata is logged, never the questions or answers
@@ -75,6 +77,8 @@ export function createApp(config) {
       knowledge: knowledge.status,
       found: knowledge.passages.length,
       cited: value.sources.length,
+      repaired: repair.repaired,
+      unverified: repair.unverified,
       ms: Date.now() - started,
     });
     return sendJson(res, 200, value);

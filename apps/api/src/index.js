@@ -1,6 +1,7 @@
 import { createApp } from "./server.js";
 import { createRetriever } from "./knowledge.js";
-import { searchKnowledge } from "../../../packages/knowledge/src/search.js";
+import { createRewriter } from "./rewrite.js";
+import { findByTitle, loadDocumentTexts, searchKnowledge } from "../../../packages/knowledge/src/search.js";
 
 const port = Number(process.env.PORT) || 4000; // Render sets PORT itself
 
@@ -8,7 +9,7 @@ const config = {
   n8nChatUrl: process.env.N8N_CHAT_URL,
   internalKey: process.env.INTERNAL_API_KEY,
   rateLimitPerMinute: Number(process.env.RATE_LIMIT_PER_MINUTE) || 30,
-  agentTimeoutMs: Number(process.env.AGENT_TIMEOUT_MS) || 120_000,
+  agentTimeoutMs: Number(process.env.AGENT_TIMEOUT_MS) || 600_000,
 };
 
 if (!config.n8nChatUrl) {
@@ -26,9 +27,14 @@ if (process.env.DATABASE_URL) {
     connectionString: process.env.DATABASE_URL,
     max: 5,
     connectionTimeoutMillis: 3000,
-    statement_timeout: 5000,
+    statement_timeout: 20000,
   });
-  config.retrieve = createRetriever({ db, search: searchKnowledge });
+  // A small model (Haiku) turns the question into search keywords; optional, the search works without it
+  const rewrite = process.env.ANTHROPIC_API_KEY
+    ? createRewriter({ apiKey: process.env.ANTHROPIC_API_KEY, model: process.env.REWRITE_MODEL || undefined })
+    : null;
+  if (!rewrite) console.warn("Warning: ANTHROPIC_API_KEY is not set, so questions are searched as typed (no translation or synonyms).");
+  config.retrieve = createRetriever({ db, search: searchKnowledge, rewrite, loadFull: loadDocumentTexts, findTitles: findByTitle });
 } else {
   console.warn("Warning: DATABASE_URL is not set, so answers are not grounded in the approved sources.");
 }

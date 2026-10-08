@@ -17,6 +17,15 @@ Errors are returned as `{ error, code }`. The website turns the `code` into a me
 
 For every question the server first searches the knowledge base (`packages/knowledge/src/search.js`) and sends the passages it found to the agent together with the question. The agent may only answer from those passages and marks each claim with `[1]`, `[2]`, ... (numbers valid for that request only). When the answer comes back, `src/cite.js` removes markers that match no passage, renumbers the rest in order of use, and returns exactly the cited passages as `sources`, each with file path, line range and the passage itself. If nothing relevant is found the agent says so instead of guessing, and if the database is down it answers from general knowledge with a warning line.
 
+How the search is done (`src/knowledge.js`, `src/rewrite.js`):
+
+- A small, cheap model (Claude Haiku, `ANTHROPIC_API_KEY`) turns the question into English search keywords: it translates, expands abbreviations, keeps codes and API names as they are and adds a few synonyms. It only does this; the answer itself is written by the Lite, Full or Super model that the n8n router picks. Without the key the question is searched as typed.
+- The question is searched twice, as typed and with the keywords, and the results are taken in turn. The keywords alone would replace specific words ("Admin Studio", "July 2025") with general ones.
+- A phrase in quotes is taken as a title: a document with exactly that title comes first.
+- A question about code ("source code", PL/SQL, a file, a method) also gets a search in the source code alone.
+- The same model flags a question that is clearly not about IFS (for example "what is 2+2"). Nothing is searched for it, so the agent gets no passages and the router picks the Lite tier. A short follow-up question is judged on its own first, so it cannot borrow the previous question to look IFS-related.
+
+
 ## Settings (environment variables)
 
 | Variable | Needed | Meaning |
@@ -26,7 +35,7 @@ For every question the server first searches the knowledge base (`packages/knowl
 | `DATABASE_URL` | no | The knowledge base ([`packages/db`](../../packages/db)). Without it the agent answers from general knowledge and says so |
 | `PORT` | no | Defaults to 4000; Render sets it |
 | `RATE_LIMIT_PER_MINUTE` | no | Requests per client per minute, default 30 |
-| `AGENT_TIMEOUT_MS` | no | How long to wait for the agent, default 120000 |
+| `AGENT_TIMEOUT_MS` | no | How long to wait for the agent, default 600000 (complete answers take minutes) |
 
 See `.env.example`. Never commit real values.
 
