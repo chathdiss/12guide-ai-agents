@@ -8,7 +8,7 @@
 //
 // The documents stay outside the repository; only this code is committed.
 import { prepareDocument } from "../prepare.js";
-import { ORIGIN, SOURCE_ID, walkIfsSource } from "../sources/ifs-source.js";
+import { ORIGIN, walkIfsSource } from "../sources/ifs-source.js";
 import { refreshTermStats } from "../store.js";
 
 function parseArgs(argv) {
@@ -33,7 +33,7 @@ async function storeDocument(client, file, chunks, hash) {
        SET title = EXCLUDED.title, origin = EXCLUDED.origin, version = EXCLUDED.version,
            component = EXCLUDED.component, meta = EXCLUDED.meta, indexed_at = now()
      RETURNING id`,
-    [SOURCE_ID, file.docKey, file.title, ORIGIN, file.version, file.component, meta],
+    [file.source, file.docKey, file.title, ORIGIN, file.version, file.component, meta],
   );
   const documentId = rows[0].id;
 
@@ -74,12 +74,14 @@ async function main() {
     pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
   }
 
-  // what is stored already: doc_key -> hash of the file it was made from
+  // what is stored already: doc_key -> hash of the file it was made from, and the source it belongs to.
+  // The doc_key starts with the version folder, so it is unique across the code versions.
   const known = new Map();
   if (pool) {
-    const { rows } = await pool.query("SELECT doc_key, meta->>'hash' AS hash FROM knowledge_documents WHERE source = $1", [SOURCE_ID]);
-    rows.forEach((r) => known.set(r.doc_key, r.hash));
+    const { rows } = await pool.query("SELECT doc_key, source, meta->>'hash' AS hash FROM knowledge_documents WHERE origin = $1", [ORIGIN]);
+    rows.forEach((r) => known.set(r.doc_key, { hash: r.hash, source: r.source }));
   }
+  const sourcesInFolder = new Set(); // --prune only looks at the versions that are in the folder
   const seen = new Set();
   let added = 0;
   let changed = 0;
@@ -98,8 +100,9 @@ async function main() {
       const { chunks, characters, hash } = await prepareDocument(file);
       if (chunks.length === 0) continue;
       seen.add(file.docKey);
+      sourcesInFolder.add(file.source);
 
-      if (pool && known.get(file.docKey) === hash) {
+      if (pool && known.get(file.docKey)?.hash === hash) {
         unchanged++;
         continue;
       }
@@ -137,9 +140,9 @@ async function main() {
 
   let removed = 0;
   if (pool && prune && limit === Infinity) {
-    const gone = [...known.keys()].filter((key) => !seen.has(key));
+    const gone = [...known.entries()].filter(([key, v]) => sourcesInFolder.has(v.source) && !seen.has(key)).map(([key]) => key);
     if (gone.length > 0) {
-      await pool.query("DELETE FROM knowledge_documents WHERE source = $1 AND doc_key = ANY($2)", [SOURCE_ID, gone]);
+      await pool.query("DELETE FROM knowledge_documents WHERE origin = $1 AND doc_key = ANY($2)", [ORIGIN, gone]);
     }
     removed = gone.length;
   }

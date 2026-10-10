@@ -6,7 +6,9 @@ const IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]{2,}/g;
 const NEEDS_SPLITTING = /_|[a-z0-9][A-Z]|[A-Z]{2,}[a-z]/;
 // Codes with punctuation inside: CAMT.053, ORA-20110, Customer_Order_API.Get_Objstate. PostgreSQL keeps
 // such a code as one token (or cuts it oddly), so its parts are indexed as plain words as well.
-const PUNCTUATED = /[A-Za-z0-9_]+(?:[.\-/][A-Za-z0-9_]+)+/g;
+// The lookbehind makes a match start only at the beginning of a run of letters and digits. Without it a very long run
+// (base64 inside an XML file) is searched again from every position, which takes minutes.
+const PUNCTUATED = /(?<![A-Za-z0-9_])[A-Za-z0-9_]+(?:[.\-/][A-Za-z0-9_]+)+/g;
 
 export function splitIdentifiers(text, limit = 4000) {
   const words = new Set();

@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { chunkText } from "../src/chunk.js";
 import { splitIdentifiers } from "../src/identifiers.js";
 import { prepareDocument } from "../src/prepare.js";
-import { loadDocumentTexts, searchKnowledge } from "../src/search.js";
+import { blendedCoverage, candidateTerms, findByName, inflections, loadDocumentTexts, namePhrases, searchKnowledge, sizeFactor, sourceWeight, titleIsAsked } from "../src/search.js";
 import { walkIfsSource } from "../src/sources/ifs-source.js";
 
 const plsql = (n) =>
@@ -107,6 +107,31 @@ describe("IFS source files", () => {
     assert.equal(account.kind, "PL/SQL package");
   });
 
+  it("reads the model files of IFS Cloud and gives every version folder its own source", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ifs-"));
+    const put = async (rel, body = "x") => {
+      const full = path.join(root, ...rel.split("/"));
+      await mkdir(path.dirname(full), { recursive: true });
+      await writeFile(full, body);
+    };
+    await put("IFS_Cloud_25R2/accrul/model/accrul/Voucher.entity", "entity Voucher {}");
+    await put("IFS_Cloud_25R2/accrul/model/accrul/Voucher.projection", "projection VoucherHandling;");
+    await put("IFS_Cloud_25R2/accrul/model/accrul/Voucher.client", "client Voucher;");
+    await put("IFS_Cloud_25R2/accrul/model/accrul/Voucher.fragment", "fragment F;");
+    await put("IFS_Cloud_25R2/accrul/model/accrul/Types.enumeration", "enumeration T {}");
+    await put("IFS_Cloud_25R2/accrul/translation/errors.txt", "noise");
+    await put("Apps10_UPD29/accrul/database/Account.plsql", "PROCEDURE X IS BEGIN NULL; END X;");
+
+    const found = [];
+    for await (const f of walkIfsSource(root)) found.push(f);
+    assert.deepEqual(found.map((f) => f.title).sort(), ["Account.plsql", "Types.enumeration", "Voucher.client", "Voucher.entity", "Voucher.fragment", "Voucher.projection"]);
+    const cloud = found.find((f) => f.title === "Voucher.projection");
+    assert.equal(cloud.source, "ifs-cloud-25r2");
+    assert.equal(cloud.version, "IFS Cloud 25R2");
+    assert.equal(cloud.kind, "projection (API)");
+    assert.equal(found.find((f) => f.title === "Account.plsql").source, "ifs-apps10-upd29");
+  });
+
   it("drops the UNUSED lines of field description files and indexes split identifiers", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "ifs-"));
     const file = path.join(root, "f.csv");
@@ -169,6 +194,285 @@ describe("search with rewritten keywords", () => {
   it("falls back to the question without keywords", async () => {
     await searchKnowledge(fakeDb([]), "currency amount", { keywords: [] });
     assert.match(fakeDb.terms, /currency/);
+  });
+});
+
+describe("word forms", () => {
+  it("gives a verb its endings: validates, validate, validated, validating", () => {
+    const forms = inflections("validates");
+    for (const f of ["validate", "validated", "validating"]) assert.ok(forms.includes(f), f);
+    assert.ok(!forms.includes("validates"), "not the word itself");
+    for (const f of ["create", "created", "creating"]) assert.ok(inflections("creates").includes(f), f);
+    assert.ok(inflections("vouchers").includes("voucher"));
+    assert.ok(inflections("voucher").includes("vouchers"));
+    assert.ok(inflections("stopped").includes("stop") === false, "a base under 5 letters is not used");
+  });
+
+  it("does not turn a word into a related word: validation and configuration stay apart", () => {
+    assert.ok(!inflections("validates").includes("validation"));
+    assert.ok(!inflections("configure").includes("configuration"));
+    assert.ok(!inflections("validation").includes("validate"));
+  });
+
+  it("leaves short words, codes, names with underscores and words with digits alone", () => {
+    for (const w of ["post", "type", "camt053", "customer_order", "ora-20110", "CAMT", "ifs", "a"]) assert.deepEqual(inflections(w), [], w);
+  });
+
+  const row = (id, text) => ({
+    id, content: text, search_text: text, start_line: 1, end_line: 2, rank: 0.1,
+    title: `T${id}`, doc_key: `doc${id}`, origin: "o", url: null, version: "", component: "", meta: {},
+  });
+  // the statistics query answers with the words that exist in the index and how many chunks have them
+  const index = { validates: 232, validate: 14000, validated: 900, validating: 380, voucher: 300, accrul: 900, package: 9000, file: 9000, method: 9000, sql: 9000 };
+  const database = () => ({
+    async query(sql, params) {
+      if (/knowledge_term_stats WHERE term = ANY/.test(sql)) {
+        return { rows: params[0].filter((t) => index[t]).map((t) => ({ term: t, df: index[t], n: 250000 })) };
+      }
+      database.sql = sql;
+      database.params = params;
+      return { rows: [row(1, "procedure validate_voucher___ checks the voucher")] };
+    },
+  });
+
+  it("scores with the forms of a word but chooses the candidates by the word itself", async () => {
+    const db = database();
+    const found = await searchKnowledge(db, "validates a voucher");
+    const [candidates, , terms, frequencies, , wordForms] = database.params;
+    // the candidates come from the words as typed: a common form cannot flood the search
+    assert.equal(candidates, "validates | voucher");
+    // every word is one entry with its forms; its weight counts the forms together
+    const at = terms.indexOf("validates");
+    assert.equal(wordForms[at], "validates | validate | validated | validating");
+    assert.equal(frequencies[at], 232 + 14000 + 900 + 380);
+    assert.equal(wordForms[terms.indexOf("voucher")], "voucher");
+    assert.equal(found[0].title, "T1");
+  });
+
+  it("searches a word that is only in the index in another form through that form", async () => {
+    const db = database();
+    await searchKnowledge(db, "voucher validated again", { keywords: ["validatings"] });
+    assert.match(database.params[0], /validatings|validating/);
+  });
+
+  it("leaves out the words that only say it is about code when the search is in the code alone", async () => {
+    const db = database();
+    await searchKnowledge(db, "Which PL/SQL package validates a voucher in accrul, and which file is it in?", { origin: "IFS source code" });
+    assert.equal(database.params[0], "validates | voucher | accrul");
+    assert.ok(!database.params[2].some((t) => ["package", "file", "sql", "pl"].includes(t)));
+    // in a search of everything the words stay: they can be the topic ("install a package")
+    await searchKnowledge(db, "Which package validates a voucher in accrul");
+    assert.ok(database.params[2].includes("package"));
+    // and when fewer than two words would be left, nothing is removed
+    await searchKnowledge(db, "package file method", { origin: "IFS source code" });
+    assert.ok(database.params[2].includes("package"));
+  });
+
+  it("can be switched off, and then searches the exact words as before", async () => {
+    const db = database();
+    await searchKnowledge(db, "which package validates a voucher", { stemming: false });
+    assert.ok(database.params[5].every((q) => !q.includes(" | ")));
+  });
+});
+
+describe("identifier splitting on very long text", () => {
+  it("handles a very long run of letters and digits in linear time and still finds codes with punctuation", () => {
+    // base64 inside an XML file: one run of 300,000 characters. The search for codes such as CAMT.053 used to retry
+    // from every position of the run, which took minutes.
+    const blob = "AbC1".repeat(75000);
+    const started = Date.now();
+    const words = splitIdentifiers(`${blob} and the code CAMT.053 or ORA-20110`);
+    assert.ok(Date.now() - started < 2000, "took " + (Date.now() - started) + " ms");
+    for (const w of ["camt", "053", "ora", "20110"]) assert.ok(words.split(" ").includes(w), w);
+  });
+});
+
+describe("oversized chunks", () => {
+  it("lowers the score of a chunk with far more words than a normal one, and leaves normal chunks alone", () => {
+    const text = (words) => Array.from({ length: words }, (_, i) => `word${i}`).join(" ");
+    const chunk = (words) => ({ content: text(words), search_text: text(words) });
+    assert.equal(sizeFactor(chunk(85)), 1);
+    assert.equal(sizeFactor(chunk(300)), 1);
+    assert.equal(sizeFactor({}), 1, "a row without text is not touched");
+    assert.ok(sizeFactor(chunk(1200)) > 0.45 && sizeFactor(chunk(1200)) < 0.55);
+    assert.ok(sizeFactor(chunk(1600)) < sizeFactor(chunk(600)));
+    // a long text with few different words (a table with repeated values) is not a chunk that matches by chance
+    const repeated = "status open closed ".repeat(2000);
+    assert.equal(sizeFactor({ content: repeated, search_text: repeated }), 1);
+  });
+
+  it("does not lower a page the question is about: half of the words of its title are asked", () => {
+    const title = "List of Predefined Database Tasks in IFS Cloud";
+    assert.equal(titleIsAsked(title, ["database", "tasks", "archive", "transaction", "rows"]), true);
+    assert.equal(titleIsAsked(title, ["validates", "voucher", "accrul"]), false);
+    assert.equal(titleIsAsked("IFS.ai Copilot", ["set", "copilot"]), true);
+    assert.equal(titleIsAsked("IFS.ai Copilot", ["voucher"]), false);
+    assert.equal(titleIsAsked("", ["voucher"]), false);
+  });
+
+  // words: how many different words the chunk has (a huge table has over a thousand)
+  const row = (id, title, words, text) => ({
+    id, content: `${text} ${Array.from({ length: words }, (_, i) => `filler${i}`).join(" ")}`, search_text: `${text} ${Array.from({ length: words }, (_, i) => `filler${i}`).join(" ")}`, start_line: 1, end_line: 2, rank: 0.1,
+    title, doc_key: `doc${id}`, origin: "IFS documentation", url: "https://x/" + id, version: "", component: "", meta: {},
+  });
+  const index = { voucher: 300, accrul: 900 };
+  const fake = (rows) => ({
+    async query(sql, params) {
+      if (/knowledge_term_stats WHERE term = ANY/.test(sql)) return { rows: params[0].filter((t) => index[t]).map((t) => ({ term: t, df: index[t], n: 250000 })) };
+      return { rows };
+    },
+  });
+
+  it("ranks a normal chunk above a huge one that holds the same words", async () => {
+    const found = await searchKnowledge(fake([row(1, "List of Predefined Database Tasks", 1400, "voucher accrul"), row(2, "Voucher posting", 90, "voucher accrul")]), "voucher accrul");
+    assert.deepEqual(found.map((f) => f.title), ["Voucher posting", "List of Predefined Database Tasks"]);
+  });
+
+  it("keeps the huge page first when the question is about it", async () => {
+    const found = await searchKnowledge(fake([row(1, "Voucher Accrul Tasks", 1400, "voucher accrul"), row(2, "Posting", 90, "voucher accrul")]), "voucher accrul tasks");
+    assert.equal(found[0].title, "Voucher Accrul Tasks");
+  });
+});
+
+describe("ranking by how many of the words a chunk has", () => {
+  const chunk = (id, doc, text, origin = "IFS source code") => ({
+    id, content: text, search_text: text, start_line: id, end_line: id + 1, rank: 0.1,
+    title: doc, doc_key: doc, origin, url: null, version: "", component: "", meta: {},
+  });
+  // "posts" is rare, "supplier" and "invoice" are common: by weight alone the rare word is worth more than both
+  const index = { posts: 300, supplier: 10000, invoice: 12000 };
+  const fake = (rows) => ({
+    async query(sql, params) {
+      if (/knowledge_term_stats WHERE term = ANY/.test(sql)) return { rows: params[0].filter((t) => index[t]).map((t) => ({ term: t, df: index[t], n: 250000 })) };
+      return { rows };
+    },
+  });
+
+  it("blends the weighted coverage with the share of the words that are present", () => {
+    assert.equal(blendedCoverage(1, 1), 1);
+    assert.equal(blendedCoverage(0, 0), 0);
+    assert.ok(blendedCoverage(0.5, 1) > blendedCoverage(0.5, 0.33));
+  });
+
+  it("puts a chunk with two of the three words above one that only has the rare word", async () => {
+    const rare = chunk(1, "DopCosting.plsql", "this procedure posts the cost");
+    const both = chunk(2, "SendSupplierInvoice.plsql", "sends the supplier invoice to the financials");
+    const found = await searchKnowledge(fake([rare, both]), "posts supplier invoice");
+    assert.deepEqual(found.map((f) => f.title), ["SendSupplierInvoice.plsql", "DopCosting.plsql"]);
+  });
+
+  it("does not drop other documents when the few chunks that pass all belong to one document", async () => {
+    // three chunks of one file pass the cut-off, but a file gives at most two results: the others must not be lost
+    const rows = [
+      chunk(1, "A.plsql", "posts supplier invoice"),
+      chunk(2, "A.plsql", "posts supplier invoice again"),
+      chunk(3, "A.plsql", "posts supplier invoice a third time"),
+      chunk(4, "B.plsql", "the invoice"),
+      chunk(5, "C.plsql", "the supplier"),
+    ];
+    const found = await searchKnowledge(fake(rows), "posts supplier invoice");
+    assert.ok(found.length >= 3, "more than the two chunks of A.plsql");
+    assert.ok(found.some((f) => f.title === "B.plsql") || found.some((f) => f.title === "C.plsql"));
+  });
+
+  it("lets source code count as much as the documentation for a question about code, and not otherwise", () => {
+    const code = { origin: "IFS source code", meta: {} };
+    const docs = { origin: "IFS documentation", meta: {} };
+    const fields = { origin: "IFS source code", meta: { kind: "field descriptions" } };
+    assert.equal(sourceWeight(code), 0);
+    assert.equal(sourceWeight(docs), 4);
+    assert.equal(sourceWeight(code, true), 4);
+    assert.equal(sourceWeight(docs, true), 4);
+    assert.equal(sourceWeight(fields, true), -2, "field description files stay at the bottom");
+  });
+
+  it("ranks code above a documentation page that has the same words when asked for code", async () => {
+    const page = chunk(1, "Delivery Continuity Tools", "validates posts supplier invoice", "IFS documentation");
+    const file = chunk(2, "VoucherHandling.plsvc", "validates posts supplier invoice");
+    const score = (found, title) => found.find((f) => f.title === title).score;
+    const normal = await searchKnowledge(fake([page, file]), "validates posts supplier invoice");
+    assert.ok(score(normal, "Delivery Continuity Tools") > score(normal, "VoucherHandling.plsvc"), "the documentation has the lead by default");
+    const forCode = await searchKnowledge(fake([page, file]), "validates posts supplier invoice", { preferCode: true });
+    assert.equal(score(forCode, "VoucherHandling.plsvc"), score(forCode, "Delivery Continuity Tools"), "the code is as good as the page");
+  });
+});
+
+describe("words that choose the candidates", () => {
+  const freq = { customer: 90000, order: 80000, line: 70000, create: 60000, payee: 40 };
+  const by = (t) => freq[t];
+
+  it("keeps only the three rarest words, rarest first", () => {
+    assert.deepEqual(candidateTerms(["customer", "order", "line", "create", "payee"], by), ["payee", "create", "line"]);
+  });
+
+  it("leaves a question with three words or fewer alone, in its own order", () => {
+    assert.deepEqual(candidateTerms(["order", "payee", "line"], by), ["order", "payee", "line"]);
+    assert.deepEqual(candidateTerms([], by), []);
+  });
+
+  it("does not change the list it is given", () => {
+    const words = ["customer", "order", "line", "create"];
+    candidateTerms(words, by);
+    assert.deepEqual(words, ["customer", "order", "line", "create"]);
+  });
+});
+
+describe("files named like the question", () => {
+  const phrases = (q) => namePhrases(q).map((p) => p.phrase);
+
+  it("turns neighbouring words into file names, longest first, with plurals made singular", () => {
+    const p = phrases("Which method creates a customer order line?");
+    assert.equal(p[0], "customerorderline");
+    for (const x of ["customerorder", "orderline"]) assert.ok(p.includes(x), x);
+    assert.ok(phrases("Which projection handles voucher types in accrul?").includes("vouchertype"));
+  });
+
+  it("lets a single long word name a file, but not a general word", () => {
+    assert.ok(phrases("Which method creates a voucher?").includes("voucher"));
+    assert.ok(!phrases("Which method creates a number?").includes("number"), "a general word names nothing");
+    assert.ok(!phrases("Which method creates an item?").includes("item"), "a short word names nothing");
+  });
+
+  it("keeps code and work inside a name, but not 'source code' or the filler words", () => {
+    assert.ok(phrases("Which package handles a currency code in the source code?").includes("currencycode"));
+    assert.ok(phrases("Which tables are used for a work task?").includes("worktask"));
+    assert.ok(!phrases("Which package is in the source code?").some((x) => x.includes("sourcecode") || x.includes("package")));
+  });
+
+  // a fake database that answers the file lookup and the chunk lookup
+  const fakeNameDb = (files, chunks) => ({
+    async query(sql, params) {
+      fakeNameDb.calls.push({ sql, params });
+      if (/FROM knowledge_documents d/.test(sql)) return { rows: files };
+      return { rows: chunks };
+    },
+  });
+  fakeNameDb.calls = [];
+  const file = (id, title, version = "IFS Cloud 25R2") => ({ id, title, version, name: title.toLowerCase() });
+  const chunk = (id, doc, title, rank) => ({ id, content: "x", start_line: id, end_line: id + 1, title, doc_key: doc, origin: "IFS source code", url: null, version: "IFS Cloud 25R2", component: "ORDER", rank });
+
+  it("returns the best chunks of the files that match the name, at most two per file", async () => {
+    const db = fakeNameDb([file(1, "CustomerOrderLine.plsql"), file(2, "CustomerOrderLineHandling.plsvc")], [chunk(10, "a/CustomerOrderLine.plsql", "CustomerOrderLine.plsql", 0.9), chunk(11, "a/CustomerOrderLine.plsql", "CustomerOrderLine.plsql", 0.8), chunk(12, "a/CustomerOrderLine.plsql", "CustomerOrderLine.plsql", 0.7), chunk(20, "a/CustomerOrderLineHandling.plsvc", "CustomerOrderLineHandling.plsvc", 0.6)]);
+    const found = await findByName(db, "Which method creates a customer order line?", { limit: 4 });
+    assert.deepEqual(found.map((f) => f.title), ["CustomerOrderLine.plsql", "CustomerOrderLine.plsql", "CustomerOrderLineHandling.plsvc"]);
+    assert.ok(found.every((f) => f.origin === "IFS source code" && f.score > 50));
+  });
+
+  it("looks at package files for a question about a method and at model files when the question asks for them", async () => {
+    const db = fakeNameDb([], []);
+    await findByName(db, "Which method creates a customer order line?");
+    assert.deepEqual(fakeNameDb.calls.at(-1).params[3], ["plsql", "plsvc", "views", "storage"]);
+    await findByName(db, "Which projection handles customer order lines?");
+    assert.ok(fakeNameDb.calls.at(-1).params[3].includes("projection"));
+    assert.ok(!fakeNameDb.calls.at(-1).params[3].includes("plsql"));
+  });
+
+  it("returns nothing when no file has the name, and asks the database nothing when the question has no name", async () => {
+    const none = fakeNameDb([], []);
+    assert.deepEqual(await findByName(none, "Which method creates a customer order line?"), []);
+    const before = fakeNameDb.calls.length;
+    assert.deepEqual(await findByName(none, "Which method is used?"), []);
+    assert.equal(fakeNameDb.calls.length, before, "no name, no query");
   });
 });
 

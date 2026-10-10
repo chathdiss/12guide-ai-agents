@@ -4,7 +4,12 @@ import path from "node:path";
 // Source files that carry meaning. Left out on purpose:
 //   .ins (installation data, huge), .resx (UI resource files), *.Designer.cs (generated form layout),
 //   icons, project and solution files, scripts.
-const KEEP = new Set([".plsql", ".plsvc", ".views", ".apv", ".cdb", ".cre", ".storage", ".upg", ".cs", ".csv", ".xml", ".java"]);
+// IFS Cloud adds the model files of the Aurena web client and of the APIs: .entity, .projection, .client,
+// .fragment, .enumeration and .utility.
+const KEEP = new Set([
+  ".plsql", ".plsvc", ".views", ".apv", ".cdb", ".cre", ".storage", ".upg", ".cs", ".csv", ".xml", ".java",
+  ".entity", ".projection", ".client", ".fragment", ".enumeration", ".utility",
+]);
 
 const KIND = {
   ".plsql": "PL/SQL package",
@@ -16,9 +21,19 @@ const KIND = {
   ".csv": "field descriptions",
   ".xml": "XML",
   ".java": "Java",
+  ".entity": "entity model",
+  ".projection": "projection (API)",
+  ".client": "web client model",
+  ".fragment": "model fragment",
+  ".enumeration": "enumeration",
+  ".utility": "utility model",
 };
 
-export const SOURCE_ID = "ifs-apps10-upd29";
+// Every version folder is its own source: Apps10_UPD29 -> "ifs-apps10-upd29", IFS_Cloud_25R2 -> "ifs-cloud-25r2"
+export const sourceOf = (versionDir) => {
+  const slug = String(versionDir).toLowerCase().replace(/_/g, "-");
+  return slug.startsWith("ifs-") ? slug : `ifs-${slug}`;
+};
 export const ORIGIN = "IFS source code";
 
 export function describeKind(ext) {
@@ -44,6 +59,7 @@ export async function* walkIfsSource(root) {
       const rel = path.relative(root, full).split(path.sep);
       const [versionDir, component = "", layer = ""] = rel;
       yield {
+        source: sourceOf(versionDir ?? ""),
         absPath: full,
         docKey: rel.join("/"),
         title: entry.name,
