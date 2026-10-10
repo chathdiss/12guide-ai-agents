@@ -22,22 +22,31 @@ export const quotedPhrases = (text) => [...text.matchAll(/["“”']([^"“”']
 // A question about code ("source code", PL/SQL, a file, a method) also gets a search in the code alone: the
 // general words of such a question ("files", "methods") otherwise pull in documentation first.
 export const asksAboutCode = (text) =>
-  /source code|pl\/?sql|\.(plsql|plsvc|views|entity|storage)\b|\b(which|what) files?\b|\bmethods?\b|\bpackages?\b/i.test(text);
+  /source code|pl\/?sql|\.(plsql|plsvc|views|entity|storage)\b|\b(which|what) (files?|projections?|entit(?:y|ies)|fragments?|procedures?|functions?|clients?|enumerations?)\b|\bmethods?\b|\bpackages?\b/i.test(text);
 const CODE_ORIGIN = "IFS source code";
 
-export async function searchBoth(search, db, query, limit, keywords, findTitles = null) {
-  const titled = findTitles ? await findTitles(db, quotedPhrases(query)) : [];
-  const exact = await search(db, query, { limit });
-  const widened = keywords?.length ? await search(db, query, { limit, keywords }) : [];
-  const code = asksAboutCode(query) ? await search(db, query, { limit: 6, keywords: keywords?.length ? keywords : null, origin: CODE_ORIGIN }) : [];
+export async function searchBoth(search, db, query, limit, keywords, findTitles = null, findNames = null) {
+  // the searches are independent: run them side by side
+  const aboutCode = asksAboutCode(query);
+  const [titled, exact, widened, code, named] = await Promise.all([
+    findTitles ? findTitles(db, quotedPhrases(query)) : [],
+    search(db, query, { limit, preferCode: aboutCode }),
+    keywords?.length ? search(db, query, { limit, keywords, preferCode: aboutCode }) : [],
+    // the code is searched with the words of the question: synonyms ("accrual accounting") only dilute the names of code
+    aboutCode ? search(db, query, { limit: 8, origin: CODE_ORIGIN }) : [],
+    // the files that are named like the thing asked about (CustomerOrderLine.plsql for "customer order line")
+    aboutCode && findNames ? findNames(db, query, { limit: 4 }) : [],
+  ]);
   const out = [];
   const seen = new Set();
   for (const r of titled) {
     seen.add(chunkKey(r));
     out.push(r);
   }
-  for (let i = 0; out.length < limit && (i < exact.length || i < widened.length || i < code.length); i++) {
-    for (const r of [exact[i], code[i], widened[i]]) {
+  for (let i = 0; out.length < limit && (i < exact.length || i < widened.length || i < code.length || i < named.length); i++) {
+    // for a question about code the code comes first, otherwise a page of the documentation leads
+    // the first named file comes after the first code result, the second after the second one, and so on
+    for (const r of code.length > 0 || named.length > 0 ? [code[i], named[i], exact[i], widened[i]] : [exact[i], widened[i]]) {
       if (!r || out.length >= limit) continue;
       const key = chunkKey(r);
       if (seen.has(key)) continue;
@@ -52,7 +61,7 @@ export async function searchBoth(search, db, query, limit, keywords, findTitles 
 // `rewrite` (optional) turns the question into keywords first; when it gives nothing, the search
 // uses the words of the question as before. `loadFull` (optional) gives the whole text of web
 // documents (community topics, blog posts) so the agent sees the complete discussion.
-export function createRetriever({ db, search, rewrite = null, loadFull = null, findTitles = null, limit = 12 }) {
+export function createRetriever({ db, search, rewrite = null, loadFull = null, findTitles = null, findNames = null, limit = 12 }) {
   return async (question, history) => {
     try {
       const query = retrievalQuery(question, history);
@@ -61,7 +70,7 @@ export function createRetriever({ db, search, rewrite = null, loadFull = null, f
       if (rewrite && query !== question && (await rewrite(question))?.offTopic) return { status: "ok", passages: [] };
       const rewritten = rewrite ? await rewrite(query) : null;
       if (rewritten?.offTopic) return { status: "ok", passages: [] };
-      const found = await searchBoth(search, db, query, limit, rewritten?.keywords ?? null, findTitles);
+      const found = await searchBoth(search, db, query, limit, rewritten?.keywords ?? null, findTitles, findNames);
       const full = loadFull ? await loadFull(db, found.filter((r) => r.url).map((r) => r.path)) : new Map();
 
       const passages = [];

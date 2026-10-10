@@ -138,11 +138,40 @@ describe("off-topic follow-up", () => {
   });
 });
 
+describe("named files in the merge", () => {
+  const r = (ref) => ({ ref, path: ref, startLine: 1, content: ref });
+  const search = async (db, q, o) => (o.origin ? [r("c1"), r("c2"), r("c3")] : [r("e1"), r("e2"), r("e3")]);
+  const names = async () => [r("n1"), r("n2")];
+
+  it("weaves the named files in behind the best results of the code search, for a question about code", async () => {
+    const out = await searchBoth(search, {}, "Which method creates a customer order line?", 12, null, null, names);
+    assert.deepEqual(out.map((x) => x.ref).slice(0, 4), ["c1", "n1", "e1", "c2"]);
+    assert.ok(out.some((x) => x.ref === "n2"));
+  });
+
+  it("does not look for named files when the question is not about code", async () => {
+    let asked = 0;
+    const out = await searchBoth(search, {}, "How do I create a customer order line?", 12, null, null, async () => (asked++, [r("n1")]));
+    assert.equal(asked, 0);
+    assert.ok(!out.some((x) => x.ref === "n1"));
+  });
+
+  it("still works without a lookup of names", async () => {
+    const out = await searchBoth(search, {}, "Which method creates a customer order line?", 12, null, null, null);
+    assert.deepEqual(out.map((x) => x.ref).slice(0, 3), ["c1", "e1", "c2"]);
+  });
+});
+
 describe("search merge", () => {
   it("searches the code alone when the question is about code", async () => {
     assert.ok(asksAboutCode("How does the voucher handling work in the ACCRUL source code?"));
     assert.ok(asksAboutCode("Show me the PL/SQL that validates a voucher, and which file it is in."));
     assert.ok(!asksAboutCode("How do I post a voucher in IFS Cloud?"));
+    // naming the kind of model file asks for code; talking about projections in general does not
+    assert.ok(asksAboutCode("Which projection handles voucher types in accrul?"));
+    assert.ok(asksAboutCode("What entity defines the voucher row?"));
+    assert.ok(!asksAboutCode("How do I grant access to a projection?"));
+    assert.ok(!asksAboutCode("What is a projection in Aurena?"));
     const origins = [];
     const search = async (db, q, o) => (origins.push(o.origin ?? null), []);
     await searchBoth(search, {}, "Which files and methods are involved?", 4, null);
