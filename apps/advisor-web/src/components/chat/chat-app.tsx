@@ -11,6 +11,7 @@ import { BrandMark } from "./brand-mark";
 import { Composer } from "./composer";
 import { LanguageToggle } from "./language-toggle";
 import { MessageItem } from "./message-item";
+import { ScopeBar } from "./scope-bar";
 import { Sidebar } from "./sidebar";
 import { ThemeMenu } from "./theme-menu";
 import { ThinkingIndicator } from "./thinking-indicator";
@@ -32,6 +33,10 @@ export function ChatApp() {
     sendMessage,
     canRetry,
     retryLast,
+    scope,
+    changeScope,
+    canRefresh,
+    refreshAnswer,
   } = useChats(lang);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -104,6 +109,7 @@ export function ChatApp() {
           <LanguageToggle />
           <ThemeMenu />
         </header>
+        <ScopeBar scope={scope} onChange={changeScope} disabled={pending} />
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {messages.length === 0 ? (
@@ -152,6 +158,10 @@ export function ChatApp() {
                     showFollowUps={!pending && isLast}
                     onFollowUp={(q) => sendMessage(q)}
                     onRetry={isLast && canRetry ? retryLast : undefined}
+                    question={m.role === "assistant" ? messages.slice(0, i).reverse().find((x) => x.role === "user")?.content : undefined}
+                    scope={scope}
+                    standalone={i === 1 && !messages[0]?.attachments?.length}
+                    onRefresh={isLast && canRefresh ? refreshAnswer : undefined}
                   />
                 );
               })}

@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/components/language-provider";
 import { cn } from "@/lib/utils";
 import type { Message, Source, Tier } from "@/lib/chat/types";
+import type { Scope } from "@/lib/memory/client";
 import { BrandMark } from "./brand-mark";
+import { Feedback } from "./feedback";
 
 type Props = {
   message: Message;
@@ -17,6 +19,13 @@ type Props = {
   onFollowUp?: (question: string) => void;
   // set on a failed answer that can be requested again
   onRetry?: () => void;
+  // what the answer belongs to: the question asked, and the customer and IFS version of the chat
+  question?: string;
+  scope?: Scope;
+  // a plain first question of the chat: its answer can be saved for reuse after a thumbs up
+  standalone?: boolean;
+  // set on a saved answer that can be replaced by a new one
+  onRefresh?: () => void;
 };
 
 const TIER_DOT: Record<Tier, string> = {
@@ -119,7 +128,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function MessageItem({ message, showFollowUps = false, onFollowUp, onRetry }: Props) {
+export function MessageItem({ message, showFollowUps = false, onFollowUp, onRetry, onRefresh, question, scope, standalone = false }: Props) {
   const { t } = useLanguage();
 
   if (message.role === "user") {
@@ -178,8 +187,23 @@ export function MessageItem({ message, showFollowUps = false, onFollowUp, onRetr
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content || "…"}</ReactMarkdown>
         </div>
 
-        <div className="mt-3 -ml-2 flex items-center gap-1">
+        <div className="mt-3 -ml-2 flex flex-wrap items-center gap-1">
           <CopyButton text={message.content} />
+          {question && scope && !message.error && <Feedback question={question} message={message} scope={scope} standalone={standalone} />}
+          {message.cached && (
+            <span
+              title={t.cachedHint}
+              className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            >
+              <Check className="size-3 text-emerald-500" />
+              {t.cachedLabel}
+            </span>
+          )}
+          {message.cached && onRefresh && (
+            <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={onRefresh}>
+              {t.cachedRefresh}
+            </Button>
+          )}
           {message.tier && (
             <span
               title={message.tierReason ? t.tierReason(message.tierReason) : undefined}
@@ -187,6 +211,15 @@ export function MessageItem({ message, showFollowUps = false, onFollowUp, onRetr
             >
               <span className={cn("size-1.5 rounded-full", TIER_DOT[message.tier])} />
               {t.tierLabel(message.tier)}
+            </span>
+          )}
+          {message.lessons && message.lessons.length > 0 && (
+            <span
+              title={message.lessons.map((l) => l.correction).join("\n\n")}
+              className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            >
+              <Check className="size-3 text-emerald-500" />
+              {t.lessonUsed(message.lessons.length)}
             </span>
           )}
         </div>

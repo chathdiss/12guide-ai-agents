@@ -32,6 +32,9 @@ export type Message = {
   attachments?: AttachmentMeta[];
   tier?: Tier;
   tierReason?: string;
+  lessons?: { id: number; correction: string }[];
+  // set when this answer was a saved one (thumbs up by a consultant) and no AI model was called
+  cached?: { id: number; savedAt?: string; match: "exact" | "similar" };
   error?: boolean;
   createdAt: number;
 };
@@ -40,6 +43,9 @@ export type Chat = {
   id: string;
   title: string;
   messages: Message[];
+  // what the consultant chose for this chat; lessons are scoped to them
+  customer?: string;
+  ifsVersion?: string;
   createdAt: number;
   updatedAt: number;
 };

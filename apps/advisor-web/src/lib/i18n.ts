@@ -67,6 +67,25 @@ export type Strings = {
   copied: string;
   thinking: string;
   retry: string;
+  customerLabel: string;
+  customerPlaceholder: string;
+  versionLabel: string;
+  versionAny: string;
+  scopeHint: string;
+  feedbackGood: string;
+  feedbackBad: string;
+  feedbackPromptBad: string;
+  feedbackPlaceholder: string;
+  feedbackSend: string;
+  feedbackSaved: string;
+  feedbackNotSaved: string;
+  feedbackReported: string;
+  cachedLabel: string;
+  cachedHint: string;
+  cachedRefresh: string;
+  feedbackTooShort: string;
+  feedbackFailed: string;
+  lessonUsed: (n: number) => string;
   errorTitle: string;
   enterHint: string;
   exampleLabels: string[];
@@ -129,6 +148,25 @@ export const STRINGS: Record<Lang, Strings> = {
     copied: "Copied",
     thinking: "Thinking…",
     retry: "Try again",
+    customerLabel: "Customer",
+    customerPlaceholder: "Customer (optional)",
+    versionLabel: "IFS version",
+    versionAny: "Any version",
+    scopeHint: "Saved answers and notes apply only to this customer and version.",
+    feedbackGood: "Good answer",
+    feedbackBad: "Not right",
+    feedbackPromptBad: "What is wrong, unsupported or missing in this answer?",
+    feedbackPlaceholder: "Describe the problem in your own words…",
+    feedbackSend: "Send",
+    feedbackSaved: "Thanks. This answer is saved and will be shown again for the same question.",
+    feedbackNotSaved: "Thanks. A follow-up answer depends on the conversation, so it is not saved for reuse.",
+    feedbackReported: "Thanks. Your note is saved. It is not treated as a verified correction; it is only used to double-check later answers.",
+    cachedLabel: "Saved answer",
+    cachedHint: "A consultant rated this answer as good. It was returned as it was, without asking the AI again.",
+    cachedRefresh: "Get a new answer",
+    feedbackTooShort: "Please write a little more (at least 8 characters).",
+    feedbackFailed: "Could not send this right now. Please try again.",
+    lessonUsed: (n) => (n === 1 ? "Used 1 confirmed lesson" : `Used ${n} confirmed lessons`),
     errorTitle: "Could not get an answer",
     enterHint: "Enter to send, Shift+Enter for a new line",
     exampleLabels: ["Configuration", "Concepts", "Releases"],
@@ -225,6 +263,25 @@ export const STRINGS: Record<Lang, Strings> = {
     copied: "Gekopieerd",
     thinking: "Even nadenken…",
     retry: "Opnieuw proberen",
+    customerLabel: "Klant",
+    customerPlaceholder: "Klant (optioneel)",
+    versionLabel: "IFS-versie",
+    versionAny: "Elke versie",
+    scopeHint: "Bewaarde antwoorden en opmerkingen gelden alleen voor deze klant en versie.",
+    feedbackGood: "Goed antwoord",
+    feedbackBad: "Niet juist",
+    feedbackPromptBad: "Wat is er onjuist, niet onderbouwd of wat ontbreekt er in dit antwoord?",
+    feedbackPlaceholder: "Beschrijf het probleem in uw eigen woorden…",
+    feedbackSend: "Versturen",
+    feedbackSaved: "Dank u. Dit antwoord is bewaard en wordt opnieuw getoond bij dezelfde vraag.",
+    feedbackNotSaved: "Dank u. Een vervolgantwoord hangt van het gesprek af en wordt daarom niet bewaard.",
+    feedbackReported: "Dank u. Uw opmerking is bewaard. Ze geldt niet als geverifieerde correctie; ze helpt alleen om latere antwoorden extra te controleren.",
+    cachedLabel: "Bewaard antwoord",
+    cachedHint: "Een consultant beoordeelde dit antwoord als goed. Het is ongewijzigd teruggegeven, zonder de AI opnieuw te vragen.",
+    cachedRefresh: "Nieuw antwoord ophalen",
+    feedbackTooShort: "Schrijf iets meer (minimaal 8 tekens).",
+    feedbackFailed: "Dit kon nu niet worden verstuurd. Probeer het opnieuw.",
+    lessonUsed: (n) => (n === 1 ? "1 bevestigde les gebruikt" : `${n} bevestigde lessen gebruikt`),
     errorTitle: "Geen antwoord ontvangen",
     enterHint: "Enter om te verzenden, Shift+Enter voor een nieuwe regel",
     exampleLabels: ["Configuratie", "Begrippen", "Releases"],
