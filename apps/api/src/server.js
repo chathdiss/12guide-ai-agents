@@ -1,12 +1,16 @@
+import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { askAgent } from "./agent.js";
+import { estimateSaved, reusable } from "./answer-cache.js";
 import { buildCitations, repairCitations } from "./cite.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { validateChatRequest } from "./validate.js";
 
+const MEMORY_MAX_BODY_BYTES = 3 * 1024 * 1024; // a stored chat, a lesson
 const DEFAULT_MAX_BODY_BYTES = 30 * 1024 * 1024; // up to 4 images of about 6 MB each, as base64
 
-// config: { n8nChatUrl, internalKey, rateLimitPerMinute, agentTimeoutMs, maxBodyBytes, fetchImpl, retrieve }
+// config: { n8nChatUrl, internalKey, rateLimitPerMinute, agentTimeoutMs, maxBodyBytes, fetchImpl, retrieve,
+//           memory (see memory.js: createMemory), reviewKey, customers, versions }
 // retrieve(question, history) searches the knowledge base: { status: "ok" | "unavailable", passages }
 export function createApp(config) {
   const maxBodyBytes = config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
@@ -24,8 +28,79 @@ export function createApp(config) {
       return handleChat(req, res);
     }
 
+    if (path.startsWith("/api/memory/")) {
+      try {
+        return await handleMemory(req, res, path);
+      } catch (err) {
+        console.error(JSON.stringify({ time: new Date().toISOString(), memory: "error", error: String(err?.message ?? err) }));
+        return sendJson(res, 500, { error: "Memory is not available right now.", code: "memory_unavailable" });
+      }
+    }
+
     return sendJson(res, 404, { error: "Not found.", code: "invalid_request" });
   });
+
+  // Memory: chats of one browser, thumbs up (saved answers) and thumbs down (reported problems), and the reviewer's queue (see memory.js)
+  async function handleMemory(req, res, path) {
+    const memory = config.memory;
+    if (!memory) return sendJson(res, 503, { error: "Memory is not configured (needs DATABASE_URL).", code: "memory_unavailable" });
+    const parts = path.split("/").filter(Boolean).slice(2); // after /api/memory
+    const clientId = String(req.headers["x-client-id"] ?? "");
+    const query = new URL(req.url ?? "/", "http://localhost").searchParams;
+
+    if (req.method !== "GET" && !limiter.allow(clientAddress(req))) {
+      return sendJson(res, 429, { error: "Too many requests. Please wait a moment.", code: "rate_limited" });
+    }
+
+    // choices for the two dropdowns of the chat
+    if (parts[0] === "scopes" && req.method === "GET") {
+      return sendJson(res, 200, { customers: config.customers ?? [], versions: config.versions ?? [] });
+    }
+
+    if (parts[0] === "chats") {
+      if (parts.length === 1 && req.method === "GET") return sendJson(res, 200, { chats: await memory.listChats(clientId) });
+      if (parts.length === 2 && req.method === "PUT") {
+        const body = await readJson(req, MEMORY_MAX_BODY_BYTES);
+        if (!body.ok) return sendJson(res, body.status, { error: body.error, code: body.code });
+        const saved = await memory.saveChat(clientId, parts[1], body.value);
+        return saved.ok ? sendJson(res, 200, { ok: true }) : sendJson(res, saved.status, { error: saved.error, code: "invalid_request" });
+      }
+      if (parts.length === 2 && req.method === "DELETE") {
+        await memory.deleteChat(clientId, parts[1]);
+        return sendJson(res, 200, { ok: true });
+      }
+    }
+
+    // A thumbs up saves the answer at once (no review); a thumbs down needs an explanation and is stored as unverified
+    if (parts[0] === "feedback" && parts.length === 1 && req.method === "POST") {
+      const body = await readJson(req, MEMORY_MAX_BODY_BYTES);
+      if (!body.ok) return sendJson(res, body.status, { error: body.error, code: body.code });
+      const done = await memory.saveFeedback({ ...body.value, clientId });
+      return done.ok ? sendJson(res, 201, done) : sendJson(res, 400, { error: done.error, code: "invalid_request" });
+    }
+
+    if (parts[0] === "lessons" || parts[0] === "stats") {
+      // everything below is for the reviewer
+      if (!config.reviewKey) return sendJson(res, 503, { error: "Review is switched off: REVIEW_API_KEY is not set.", code: "review_disabled" });
+      if (!sameSecret(String(req.headers["x-review-key"] ?? ""), config.reviewKey)) {
+        return sendJson(res, 401, { error: "Wrong review key.", code: "unauthorized" });
+      }
+      if (parts[0] === "stats" && req.method === "GET") {
+        return sendJson(res, 200, await memory.cacheStats({ days: Number(query.get("days")) || 30 }));
+      }
+      if (parts.length === 1 && req.method === "GET") {
+        return sendJson(res, 200, { lessons: await memory.listLessons({ status: query.get("status") ?? "unverified" }) });
+      }
+      if (parts.length === 3 && parts[2] === "review" && req.method === "POST") {
+        const body = await readJson(req, MEMORY_MAX_BODY_BYTES);
+        if (!body.ok) return sendJson(res, body.status, { error: body.error, code: body.code });
+        const done = await memory.reviewLesson(parts[1], body.value ?? {});
+        return done.ok ? sendJson(res, 200, { lesson: done.lesson }) : sendJson(res, done.error === "Lesson not found." ? 404 : 400, { error: done.error, code: "invalid_request" });
+      }
+    }
+
+    return sendJson(res, 404, { error: "Not found.", code: "invalid_request" });
+  }
 
   async function handleChat(req, res) {
     const started = Date.now();
@@ -48,12 +123,48 @@ export function createApp(config) {
       return sendJson(res, checked.status, { error: checked.error, code: checked.code });
     }
 
+    // An answer that a consultant rated with a thumbs up, for the same question, customer, IFS version and language:
+    // it is returned as it is, before anything that calls an AI model (the keyword rewrite and the agent). Any
+    // problem with the memory just means "no saved answer".
+    const askedCached = config.memory?.findCachedAnswer && !checked.value.fresh && reusable(checked.value);
+    if (askedCached) {
+      const saved = await config.memory
+        .findCachedAnswer({ question: checked.value.question, customer: checked.value.customer, ifsVersion: checked.value.ifsVersion, language: checked.value.language })
+        .catch(() => null);
+      if (saved) {
+        const tokensSaved = estimateSaved(saved.answer);
+        config.memory.recordCacheEvent?.({ outcome: "hit", answerId: saved.id, tokensSaved });
+        config.memory.usedAnswer?.(saved.id);
+        log({ status: 200, cached: saved.match, savedTokens: tokensSaved, ms: Date.now() - started });
+        return sendJson(res, 200, {
+          answer: saved.answer,
+          sources: saved.sources,
+          ...(saved.tier ? { tier: saved.tier } : {}),
+          ...(saved.tierReason ? { tierReason: saved.tierReason } : {}),
+          ...(saved.followUps ? { followUps: saved.followUps } : {}),
+          cached: { id: saved.id, savedAt: saved.savedAt, match: saved.match },
+        });
+      }
+      config.memory.recordCacheEvent?.({ outcome: "miss" });
+    }
+
     // Search the approved sources first: the agent may only answer from what is found here
     const knowledge = config.retrieve
       ? await config.retrieve(checked.value.question, checked.value.history)
       : { status: "unavailable", passages: [] };
 
-    const result = await askAgent({ ...checked.value, knowledge: knowledge.status, passages: knowledge.passages }, {
+    // Lessons that a reviewer approved for this customer and IFS version; a failure here never stops an answer
+    const lessons = config.memory
+      ? await config.memory.findLessons({ customer: checked.value.customer, ifsVersion: checked.value.ifsVersion, question: checked.value.question }).catch(() => [])
+      : [];
+
+    // Concerns that consultants reported about similar questions (thumbs down). They are not verified: the agent only
+    // uses them to check the passages again
+    const reports = config.memory?.findReports
+      ? await config.memory.findReports({ customer: checked.value.customer, ifsVersion: checked.value.ifsVersion, question: checked.value.question }).catch(() => [])
+      : [];
+
+    const result = await askAgent({ ...checked.value, knowledge: knowledge.status, passages: knowledge.passages, lessons, reports }, {
       url: config.n8nChatUrl,
       internalKey: config.internalKey,
       timeoutMs: config.agentTimeoutMs,
@@ -68,7 +179,13 @@ export function createApp(config) {
     // markers the model put under the wrong number are moved to the passage that holds the fact
     const repair = repairCitations(result.value.answer, knowledge.passages);
     const cited = buildCitations(repair.answer, knowledge.passages);
-    const value = { ...result.value, answer: cited.answer, sources: cited.sources };
+    const value = {
+      ...result.value,
+      answer: cited.answer,
+      sources: cited.sources,
+      // so the page can show that confirmed lessons were available for this answer
+      ...(lessons.length > 0 ? { lessons: lessons.map((l) => ({ id: l.id, correction: l.correction })) } : {}),
+    };
 
     // Only metadata is logged, never the questions or answers
     log({
@@ -86,6 +203,13 @@ export function createApp(config) {
 
   server.on("close", () => limiter.stop());
   return server;
+}
+
+// Compares two secrets without leaking, through timing, how much of them matched
+function sameSecret(given, expected) {
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function sendJson(res, status, data) {

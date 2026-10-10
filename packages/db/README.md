@@ -18,6 +18,8 @@ Create the tables with `npm run db:init` in `packages/knowledge`.
 ## Files
 
 - `schema/001_knowledge.sql`: documents and chunks, with a full-text index. Works on any PostgreSQL.
+- `schema/002_term_stats.sql`: how many chunks contain each word, for weighting search terms.
+- `schema/003_memory.sql`: answers with a thumbs up (saved at once and reused without an AI call), notes after a thumbs down (unverified until a reviewer confirms them), the log of saved-answer hits and misses, and the chats kept on the server. It also moves databases made earlier to the new note status; running it again is safe.
 - Vectors (pgvector) are added in a later numbered file, once the embeddings model is chosen: the size of the vectors depends on it.
 
 `.env` is ignored by git. Never commit passwords or connection strings.

@@ -1,7 +1,8 @@
 import { createApp } from "./server.js";
 import { createRetriever } from "./knowledge.js";
+import { createMemory } from "./memory.js";
 import { createRewriter } from "./rewrite.js";
-import { findByTitle, loadDocumentTexts, searchKnowledge } from "../../../packages/knowledge/src/search.js";
+import { findByName, findByTitle, loadDocumentTexts, searchKnowledge } from "../../../packages/knowledge/src/search.js";
 
 const port = Number(process.env.PORT) || 4000; // Render sets PORT itself
 
@@ -10,7 +11,16 @@ const config = {
   internalKey: process.env.INTERNAL_API_KEY,
   rateLimitPerMinute: Number(process.env.RATE_LIMIT_PER_MINUTE) || 30,
   agentTimeoutMs: Number(process.env.AGENT_TIMEOUT_MS) || 600_000,
+  // the choices of the customer and IFS version dropdowns, and the key of the lesson reviewer
+  customers: list(process.env.MEMORY_CUSTOMERS),
+  versions: list(process.env.MEMORY_VERSIONS, ["IFS Apps 10", "IFS Cloud 23R2", "IFS Cloud 24R1", "IFS Cloud 24R2", "IFS Cloud 25R1", "IFS Cloud 25R2", "IFS Cloud 26R1"]),
+  reviewKey: process.env.REVIEW_API_KEY || "",
 };
+
+function list(value, fallback = []) {
+  const items = String(value ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  return items.length > 0 ? items : fallback;
+}
 
 if (!config.n8nChatUrl) {
   console.warn("Warning: N8N_CHAT_URL is not set, so /api/chat will answer with a configuration error.");
@@ -34,7 +44,8 @@ if (process.env.DATABASE_URL) {
     ? createRewriter({ apiKey: process.env.ANTHROPIC_API_KEY, model: process.env.REWRITE_MODEL || undefined })
     : null;
   if (!rewrite) console.warn("Warning: ANTHROPIC_API_KEY is not set, so questions are searched as typed (no translation or synonyms).");
-  config.retrieve = createRetriever({ db, search: searchKnowledge, rewrite, loadFull: loadDocumentTexts, findTitles: findByTitle });
+  config.memory = createMemory(db);
+  config.retrieve = createRetriever({ db, search: searchKnowledge, rewrite, loadFull: loadDocumentTexts, findTitles: findByTitle, findNames: findByName });
 } else {
   console.warn("Warning: DATABASE_URL is not set, so answers are not grounded in the approved sources.");
 }

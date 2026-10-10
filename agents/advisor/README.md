@@ -51,7 +51,10 @@ The request and response shapes are defined in `apps/advisor-web/src/lib/chat/ap
 
 Grounded search: the backend searches `packages/knowledge` and sends the passages to this workflow with each question; the agent answers only from them and cites them. Re-import the workflow file after changes to the prompts. More sources (IFS Community, 12Guide) and vector search come later.
 
+## Memory (Step 9)
+
+The backend adds confirmed lessons (`lessons`) and unverified concerns from thumbs-down notes (`reports`) to the request, with the `customer` and `ifsVersion` the consultant chose. The Build prompt node puts them in a `<confirmed_lessons>` and a `<reported_issues status="unverified">` block next to the sources. The Memory rule tells the agent to use a confirmed lesson when it applies (saying in words that it rests on one, without a [n] marker) and to follow it over a source when they conflict; the Reported issues rule tells it that a report is not verified and never a source, to use it only as a reason to check the passages again, and to ignore it when the passages do not support it. Answers that got a thumbs up are returned by the backend without calling this workflow at all. **Re-import both workflow files after pulling this change.** See `apps/api/README.md` for how answers are saved and reused and how notes are reviewed.
+
 ## Not built yet
 
-- Memory (`packages/memory`).
 - The tier rules and prompts live inside the workflow JSON. They can be moved into code in this folder when the team decides how the agent is deployed.

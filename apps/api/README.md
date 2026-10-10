@@ -9,9 +9,23 @@ The Claude API key is **not** needed here. Claude is called by the n8n workflow,
 | Method and path | What it does |
 |---|---|
 | `GET /api/health` | Returns `{"status":"ok"}` |
-| `POST /api/chat` | Takes `{ chatId, question, language, history, attachments }` and returns `{ answer, sources, tier, tierReason, followUps }` |
+| `POST /api/chat` | Takes `{ chatId, question, language, customer, ifsVersion, history, attachments }` and returns `{ answer, sources, tier, tierReason, followUps, lessons }` |
+| `GET /api/memory/scopes` | The choices of the customer and IFS version dropdowns |
+| `GET /api/memory/chats`, `PUT` and `DELETE /api/memory/chats/:id` | The chats of one browser, kept on the server. The browser is identified by the random id in the `X-Client-Id` header |
+| `POST /api/memory/feedback` | A thumbs up or down under an answer: `{ rating: "up" | "down", customer, ifsVersion, language, question, answer, sources, tier, followUps, standalone, cacheId, comment }`. Up saves the answer at once (no review); down needs `comment` (at least 8 characters) |
+| `GET /api/memory/lessons?status=unverified`, `POST /api/memory/lessons/:id/review`, `GET /api/memory/stats` | For the reviewer, with the key in the `X-Review-Key` header: list the notes of a status, confirm (`approved`) or dismiss (`rejected`) one and fix its wording; how many questions saved answers served and the tokens that saved |
 
 Errors are returned as `{ error, code }`. The website turns the `code` into a message in the chosen language (`invalid_request`, `attachments_invalid`, `rate_limited`, `not_found`, `n8n_status`, `no_answer`, `too_slow`, `unreachable`, `not_configured`).
+
+## Memory
+
+Two kinds of memory are kept in PostgreSQL (`packages/db/schema/003_memory.sql`, code in `src/memory.js`):
+
+- **Saved answers (thumbs up).** A thumbs up saves the question and its answer at once, with no review (`memory_answers`, `src/answer-cache.js`). When a consultant later asks the same or a very similar question, **before anything that calls an AI model** (the keyword rewrite and the agent), the server looks for a saved answer and returns it as it is, with its sources, tier and follow-up questions and a `cached` field, so the page shows "Saved answer" and a "Get a new answer" button (`fresh: true` skips the saved answer). A saved answer is used only when the customer, IFS version and language are equal (empty only matches empty), the question is a plain first question (no history, no attachment, at most 1,000 characters), and the question matches: the content words are equal after removing filler words and word endings, or, in a question of 8 or more words, differ by one word per 8 words; codes, numbers, names and quoted text must be identical, and a negation (not, without, niet) never matches a question without one. A short question must therefore match completely. No AI is used for matching. A thumbs down on a saved answer switches it off, and a saved answer expires after 60 days. Every repeatable question is logged as a hit or a miss; a hit counts about 6,000 tokens for the prompt that was not sent plus the length of the answer (an estimate, shown on `/review`).
+- **Thumbs down.** The consultant must write what is wrong, unsupported or missing. It is stored with the question and the answer as *unverified* (`memory_lessons`) and is never treated as a verified correction. For a similar question of the same customer and IFS version (or of all) the server sends up to two such notes to the agent as `<reported_issues status="unverified">`; the agent may only use them as a reason to check the passages again. On the page `/review` (needs `REVIEW_API_KEY`) a reviewer can confirm a note (then it is a lesson that the agent follows, sent as `<confirmed_lessons>` and shown as "Used 1 confirmed lesson") or dismiss it. Customer and version come from the two dropdowns above the chat. A note or answer of one customer is never used for another.
+- **Chats.** The web app keeps each chat on the server too, so chats survive a cleared browser. There are no user accounts yet: a chat belongs to a random id that the browser creates once and sends in `X-Client-Id`. It works like a password for those chats, so it is never logged. Real accounts can replace it later.
+
+Chats contain the questions and answers, so they are stored data: decide how long to keep them, and delete a chat in the web app to remove it from the server too. Memory needs `DATABASE_URL`; without it the app keeps working from the browser's own storage.
 
 ## How answers are grounded
 
@@ -22,7 +36,7 @@ How the search is done (`src/knowledge.js`, `src/rewrite.js`):
 - A small, cheap model (Claude Haiku, `ANTHROPIC_API_KEY`) turns the question into English search keywords: it translates, expands abbreviations, keeps codes and API names as they are and adds a few synonyms. It only does this; the answer itself is written by the Lite, Full or Super model that the n8n router picks. Without the key the question is searched as typed.
 - The question is searched twice, as typed and with the keywords, and the results are taken in turn. The keywords alone would replace specific words ("Admin Studio", "July 2025") with general ones.
 - A phrase in quotes is taken as a title: a document with exactly that title comes first.
-- A question about code ("source code", PL/SQL, a file, a method) also gets a search in the source code alone.
+- A question about code ("source code", PL/SQL, a method, a package, or "which file / projection / entity / fragment ...") also gets a search in the source code alone, with the words of the question (not the synonyms) and without the words that only say it is about code. The files named like the question ("customer order line" -> `CustomerOrderLine.plsql`) are looked up too and woven in behind the best code results. The searches run side by side, and for a code question the code results come first and the other searches let source code count as much as the documentation.
 - The same model flags a question that is clearly not about IFS (for example "what is 2+2"). Nothing is searched for it, so the agent gets no passages and the router picks the Lite tier. A short follow-up question is judged on its own first, so it cannot borrow the previous question to look IFS-related.
 
 
@@ -33,6 +47,8 @@ How the search is done (`src/knowledge.js`, `src/rewrite.js`):
 | `N8N_CHAT_URL` | yes | Production URL of the Advisor webhook in n8n |
 | `INTERNAL_API_KEY` | yes | Shared secret, sent to n8n as the `X-Internal-Key` header |
 | `DATABASE_URL` | no | The knowledge base ([`packages/db`](../../packages/db)). Without it the agent answers from general knowledge and says so |
+| `REVIEW_API_KEY` | no | Key of the reviewer page `/review` (confirming or dismissing thumbs-down notes, statistics). Without it reviewing is switched off; saved answers and unverified notes still work |
+| `MEMORY_CUSTOMERS`, `MEMORY_VERSIONS` | no | Comma-separated choices of the two dropdowns. Customers can also be typed freely; the versions have a default list |
 | `PORT` | no | Defaults to 4000; Render sets it |
 | `RATE_LIMIT_PER_MINUTE` | no | Requests per client per minute, default 30 |
 | `AGENT_TIMEOUT_MS` | no | How long to wait for the agent, default 600000 (complete answers take minutes) |

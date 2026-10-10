@@ -36,8 +36,13 @@ export function validateChatRequest(body) {
       chatId: typeof body.chatId === "string" ? body.chatId.slice(0, 100) : "",
       question,
       language: body.language === "nl" ? "nl" : "en",
+      // the customer and IFS version the consultant chose: lessons are scoped to them
+      customer: typeof body.customer === "string" ? body.customer.trim().slice(0, 80) : "",
+      ifsVersion: typeof body.ifsVersion === "string" ? body.ifsVersion.trim().slice(0, 80) : "",
       attachments,
       history: cleanHistory(body.history),
+      // true when the consultant asks for a new answer instead of a saved one
+      fresh: body.fresh === true,
     },
   };
 }
